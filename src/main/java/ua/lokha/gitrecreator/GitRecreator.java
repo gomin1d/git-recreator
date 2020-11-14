@@ -8,14 +8,15 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class GitRecreator {
 
-    private List<Commit> commits = new ArrayList<>();
+    private LinkedList<Commit> commitsQueue = new LinkedList<>();
+    private Map<String, Commit> cache = new HashMap<>();
+
     private File from;
     private File to;
 
@@ -30,93 +31,169 @@ public class GitRecreator {
             throw new FileNotFoundException(from.getAbsolutePath());
         }
 
-        FileUtils.deleteDirectory(to);
+        execute(to, "rm -rf *", true);
+        execute(to, "rm -rf .*", true);
         FileUtils.forceMkdir(to);
         for (File file : from.listFiles((dir, name) -> name.endsWith(".patch"))) {
             file.delete();
         }
-
+        executeFrom("git clean -fdx"); // clear untracked files
 
         this.loadCommits();
 
-        if (commits.isEmpty()) {
+        if (commitsQueue.isEmpty()) {
             System.out.println("commits count is 0");
             return;
         }
 
         executeTo("git init");
 
+        Pattern windowsPathPrefix = Pattern.compile("[A-Z]:");
         int branchId = 0;
-        for (Commit commit : commits) {
-            if (commit.getParents().size() > 1) {
+
+        Commit next = commitsQueue.getFirst();
+        main: while (next != null) {
+            System.out.println("iterate " + next);
+
+            for (Commit parent : next.getParents()) {
+                if (parent.getNewHash() == null) {
+                    System.out.println("need parent first " + parent);
+                    next = parent;
+                    continue main;
+                }
+            }
+
+            Commit commit = next;
+            commitsQueue.remove(next);
+            if (commitsQueue.isEmpty()) {
+                next = null;
+            } else {
+                next = commitsQueue.getFirst();
+            }
+
+            // некоторые коммиты надо пропускать, сюда сохраняется коммит
+            // который будет заменен, если текущий коммит надо пропустить
+            Commit replace = null;
+
+            if (commit.getParents().size() > 1) { // is merge
                 Commit mergeTo = commit.getParents().get(0);
-                Commit mergeFrom = commit.getParents().get(1);
+                Commit mergeFrom = replace = commit.getParents().get(1);
                 System.out.println("merge " + mergeFrom.getOldHash() + " to " + mergeTo.getOldHash());
 
                 executeTo("git checkout " + mergeTo.getNewHash());
-                List<String> result = execute(to, "git merge " + mergeFrom.getNewHash(), true);
-                boolean conflict = false;
-                for (String line : result) {
-                    if (line.startsWith("CONFLICT ")) {
-                        if (!line.startsWith("CONFLICT (content): Merge conflict in ")) {
-                            throw new IllegalStateException(line);
-                        }
-                        conflict = true;
-                        String path = line.replace("CONFLICT (content): Merge conflict in ", "");
-                        File fromFile = new File(from, path.replace("/", File.separator));
-                        File toFile = new File(to, path.replace("/", File.separator));
-                        System.out.println("copy " + fromFile.getAbsolutePath() + " to " + toFile.getAbsolutePath());
-                        executeFrom("git checkout " + commit.getOldHash());
-                        FileUtils.copyFile(fromFile, toFile);
-                        executeTo("git add " + path);
-                    }
-                }
+                execute(to, "git merge " + mergeFrom.getNewHash() + " --no-commit", true);
 
-                if (conflict) {
-                    executeTo("git merge --continue");
-                }
-
-                String newHash = executeTo("git rev-parse HEAD").get(0);
-                commit.setNewHash(newHash);
-
-                if (commit.getChildren().isEmpty()) {
-                    executeTo("git checkout -b branch-" + branchId++);
-                }
             } else {
-                String patchName = executeFrom("git format-patch -1 " + commit.getOldHash()).get(0);
-                File patch = new File(from, patchName);
                 if (!commit.getParents().isEmpty()) {
                     executeTo("git checkout " + commit.getParents().get(0).getNewHash());
+                    replace = commit.getParents().get(0);
                 }
-                executeTo("git am < " + patch.getAbsolutePath());
+            }
+
+            System.out.println("rsync files");
+            executeFrom("git checkout " + commit.getOldHash() + " -f");
+            executeFrom("git clean -fdx"); // clear untracked files
+
+            String path = to.getAbsolutePath().replace("\\", "/");
+            Matcher matcher = windowsPathPrefix.matcher(path);
+            if (matcher.find()) {
+                String[] data = path.split(":", 2);
+                path = "/" + data[0].toLowerCase() + data[1];
+            }
+
+            executeFrom("rsync -a --delete --progress --exclude .git . \"" + path + "\"");
+            executeTo("git add -A");
+
+            String messageArg = commit.getMessage();
+            messageArg = messageArg.replace("\"", "\\\"");
+            messageArg = messageArg.replace("\n", "\\n");
+            List<String> commitResult = execute(to,"git commit -m \"" + messageArg + "\" " +
+                    "--date \"" + commit.getDate() + "\" " +
+                    "--author \"" + commit.getAuthor() + "\"", true);
+
+            if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit, working tree clean"))) {
+                // fast forward
+                System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
+                for (Commit child : commit.getChildren()) {
+                    ListIterator<Commit> iterator = child.getParents().listIterator();
+                    while (iterator.hasNext()) {
+                        if (iterator.next().equals(commit)) {
+                            if (replace == null) {
+                                iterator.remove();
+                            } else {
+                                iterator.set(replace);
+                            }
+                        }
+                    }
+                }
+                if (replace != null) {
+                    replace.setChildren(commit.getChildren());
+                }
+                commit = replace;
+            } else {
                 String newHash = executeTo("git rev-parse HEAD").get(0);
                 commit.setNewHash(newHash);
-                patch.delete();
+            }
 
-                if (commit.getChildren().isEmpty()) {
-                    executeTo("git checkout -b branch-" + branchId++);
-                }
+            if (commit != null && commit.getChildren().isEmpty()) {
+                executeTo("git checkout -b branch-" + branchId++);
             }
         }
     }
 
     private void loadCommits() {
-        List<String> commitsRaw = executeFrom("git log --all --oneline --no-abbrev --no-decorate");
-        Collections.reverse(commitsRaw);
+        List<String> commitsRaw = executeFrom("git log --all --no-abbrev --no-decorate");
 
-        for (String line : commitsRaw) {
-            try {
-                String[] data = line.split(" ", 2);
-                String hash = data[0];
-                String message = data[1];
-                Commit commit = new Commit(hash);
-                commit.setMessage(message);
-                commits.add(commit);
-            } catch(Exception e) {
-                System.out.println("Ошибка в цикле при обработке line: " + line);;
-                throw e;
+        Iterator<String> it = commitsRaw.iterator();
+        String start = it.next();
+        while (it.hasNext()) {
+            String hash = start;
+            if (!hash.startsWith("commit ")) {
+                throw new IllegalStateException("is no hash: " + hash);
             }
+            hash = hash.replace("commit ", "");
+
+            String author;
+            do {
+                author = it.next();
+            }while (!author.startsWith("Author: "));
+            author = author.replace("Author: ", "");
+
+            String date;
+            do {
+                date = it.next();
+            }while (!date.startsWith("Date:   "));
+            date = date.replace("Date:   ", "");
+
+            while (!it.next().equals("")) {} // skip start message empty line
+
+            StringBuilder builder = new StringBuilder();
+            while (it.hasNext()) {
+                String next = it.next();
+                if (next.startsWith("commit ")) {
+                    start = next;
+                    break;
+                } else {
+                    if (builder.length() > 0) {
+                        builder.append("\n");
+                    }
+                    builder.append(next.replace("    ", ""));
+                }
+            }
+
+            Commit commit = new Commit(hash);
+            commit.setAuthor(author);
+            commit.setDate(date);
+            String message = builder.toString();
+            if (message.endsWith("\n")) {
+                message = message.substring(0, message.length() - 1);
+            }
+            commit.setMessage(message);
+            commitsQueue.add(commit);
+            cache.put(commit.getOldHash(), commit);
         }
+
+        Collections.reverse(commitsQueue);
 
         List<String> childrenRaw = executeFrom("git rev-list --children --all");
         for (String line : childrenRaw) {
@@ -144,9 +221,11 @@ public class GitRecreator {
     }
 
     public Commit getCommitByHash(String hash) {
-        return commits.stream()
-                .filter(commit -> commit.getOldHash().equals(hash))
-                .findFirst().orElseThrow(()->new NoSuchElementException(hash));
+        Commit commit = cache.get(hash);
+        if (commit == null) {
+            throw new NoSuchElementException(hash);
+        }
+        return commit;
     }
 
     public List<String> executeTo(String command) {
@@ -160,31 +239,46 @@ public class GitRecreator {
     @SneakyThrows
     public List<String> execute(File base, String command, boolean ignoreError) {
         System.out.println("execute: " + command);
-        ProcessBuilder builder = new ProcessBuilder(
-                "cmd.exe", "/c", "cd \"" + base.getAbsolutePath() + "\" && " + command);
-        builder.redirectErrorStream(true);
-        Process p = builder.start();
-        BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
-        List<String> result = new ArrayList<>();
-        while (true) {
-            String line = r.readLine();
-            if (line == null) { break; }
-            result.add(line);
+        ProcessBuilder builder;
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            builder = new ProcessBuilder(
+                    "cmd.exe", "/c", "cd \"" + base.getAbsolutePath() + "\" && " + command);
+        } else {
+            builder = new ProcessBuilder("bash", "-c", "cd \"" + base.getAbsolutePath() + "\" && " + command);
         }
-
-        int limit = 0;
-        for (String line : result) {
-            if (limit++ == 20) {
-                System.out.println("...");
-                break;
+        try {
+            builder.redirectErrorStream(true);
+            builder.directory(base);
+            Process p = builder.start();
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
+            List<String> result = new ArrayList<>();
+            while (true) {
+                String line = r.readLine();
+                if (line == null) { break; }
+                result.add(line);
             }
-            System.out.println(line);
-        }
 
-        int exitCode = p.waitFor();
-        if (exitCode != 0 && !ignoreError) {
-            throw new IllegalStateException("return exit code " + exitCode + " is not 0");
+            int limit = 0;
+            for (String line : result) {
+                if (limit++ == 20) {
+                    System.out.println("...");
+                    break;
+                }
+                System.out.println(line);
+            }
+
+            int exitCode = p.waitFor();
+            if (exitCode != 0 && !ignoreError) {
+                throw new IllegalStateException("return exit code " + exitCode + " is not 0");
+            }
+            return result;
+        } catch (Exception e) {
+            if (ignoreError) {
+                e.printStackTrace();
+                return Collections.emptyList();
+            } else {
+                throw e;
+            }
         }
-        return result;
     }
 }

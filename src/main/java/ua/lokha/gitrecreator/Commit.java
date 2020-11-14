@@ -11,6 +11,8 @@ public class Commit {
     private String message;
     private String oldHash;
     private String newHash;
+    private String author;
+    private String date;
     private List<Commit> parents = new ArrayList<>();
     private List<Commit> children = new ArrayList<>();
 
@@ -35,6 +37,10 @@ public class Commit {
     public String toString() {
         return "Commit{" +
                 "message='" + message + '\'' +
+                ", oldHash='" + oldHash + '\'' +
+                ", newHash='" + newHash + '\'' +
+                ", author='" + author + '\'' +
+                ", date='" + date + '\'' +
                 '}';
     }
 }
