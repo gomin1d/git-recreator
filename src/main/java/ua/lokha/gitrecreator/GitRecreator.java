@@ -1,5 +1,6 @@
 package ua.lokha.gitrecreator;
 
+import lombok.Getter;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
 
@@ -12,17 +13,28 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Getter
 public class GitRecreator {
 
     private LinkedList<Commit> commitsQueue = new LinkedList<>();
-    private Map<String, Commit> cache = new HashMap<>();
+    private Map<String, Commit> commits = new HashMap<>();
 
     private File from;
     private File to;
 
+    private int branchId;
+
     public GitRecreator(File from, File to) {
         this.from = from;
         this.to = to;
+    }
+
+    public GitRecreator(LinkedList<Commit> commitsQueue, Map<String, Commit> commits, File from, File to, int branchId) {
+        this.commitsQueue = commitsQueue;
+        this.commits = commits;
+        this.from = from;
+        this.to = to;
+        this.branchId = branchId;
     }
 
     @SneakyThrows
@@ -41,18 +53,28 @@ public class GitRecreator {
 
         this.loadCommits();
 
+        executeTo("git init");
+
+        continueRecreate();
+    }
+
+    @SneakyThrows
+    public void continueRecreate() {
         if (commitsQueue.isEmpty()) {
             System.out.println("commits count is 0");
             return;
         }
 
-        executeTo("git init");
-
         Pattern windowsPathPrefix = Pattern.compile("[A-Z]:");
-        int branchId = 0;
 
         Commit next = commitsQueue.getFirst();
+        System.out.println("начинаем с коммита " + next);
+
         main: while (next != null) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException();
+            }
+
             System.out.println("iterate " + next);
 
             for (Commit parent : next.getParents()) {
@@ -64,12 +86,6 @@ public class GitRecreator {
             }
 
             Commit commit = next;
-            commitsQueue.remove(next);
-            if (commitsQueue.isEmpty()) {
-                next = null;
-            } else {
-                next = commitsQueue.getFirst();
-            }
 
             // некоторые коммиты надо пропускать, сюда сохраняется коммит
             // который будет заменен, если текущий коммит надо пропустить
@@ -138,6 +154,13 @@ public class GitRecreator {
             if (commit != null && commit.getChildren().isEmpty()) {
                 executeTo("git checkout -b branch-" + branchId++);
             }
+
+            commitsQueue.remove(next);
+            if (commitsQueue.isEmpty()) {
+                next = null;
+            } else {
+                next = commitsQueue.getFirst();
+            }
         }
     }
 
@@ -190,7 +213,7 @@ public class GitRecreator {
             }
             commit.setMessage(message);
             commitsQueue.add(commit);
-            cache.put(commit.getOldHash(), commit);
+            commits.put(commit.getOldHash(), commit);
         }
 
         Collections.reverse(commitsQueue);
@@ -221,7 +244,7 @@ public class GitRecreator {
     }
 
     public Commit getCommitByHash(String hash) {
-        Commit commit = cache.get(hash);
+        Commit commit = commits.get(hash);
         if (commit == null) {
             throw new NoSuchElementException(hash);
         }

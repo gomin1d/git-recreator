@@ -20,6 +20,14 @@ public class Commit {
         this.oldHash = oldHash;
     }
 
+    public Commit(String message, String oldHash, String newHash, String author, String date) {
+        this.message = message;
+        this.oldHash = oldHash;
+        this.newHash = newHash;
+        this.author = author;
+        this.date = date;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
