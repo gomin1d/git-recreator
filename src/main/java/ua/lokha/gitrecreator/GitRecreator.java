@@ -65,7 +65,8 @@ public class GitRecreator {
             return;
         }
 
-        Pattern windowsPathPrefix = Pattern.compile("[A-Z]:");
+        File gitMessage = new File("git-message.txt");
+        gitMessage.deleteOnExit();
 
         Commit next = commitsQueue.getFirst();
         System.out.println("начинаем с коммита " + next);
@@ -110,20 +111,18 @@ public class GitRecreator {
             executeFrom("git checkout " + commit.getOldHash() + " -f");
             executeFrom("git clean -fdx"); // clear untracked files
 
-            String path = to.getAbsolutePath().replace("\\", "/");
-            Matcher matcher = windowsPathPrefix.matcher(path);
-            if (matcher.find()) {
-                String[] data = path.split(":", 2);
-                path = "/" + data[0].toLowerCase() + data[1];
-            }
-
-            executeFrom("rsync -a --delete --progress --exclude .git . \"" + path + "\"");
+            executeFrom("rsync -a --delete --progress --exclude .git . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
             executeTo("git add -A");
 
-            String messageArg = commit.getMessage();
-            messageArg = messageArg.replace("\"", "\\\"");
-            messageArg = messageArg.replace("\n", "\\n");
-            List<String> commitResult = execute(to,"git commit -m \"" + messageArg + "\" " +
+            String message = commit.getMessage();
+            String messageArg;
+            if (message.contains("\"") || message.contains("\n")) {
+                FileUtils.writeStringToFile(gitMessage, message, StandardCharsets.UTF_8);
+                messageArg = "-F " + gitMessage.getAbsolutePath();
+            } else {
+                messageArg = "-m \"" + message + "\"";
+            }
+            List<String> commitResult = execute(to,"git commit " + messageArg + " " +
                     "--date \"" + commit.getDate() + "\" " +
                     "--author \"" + commit.getAuthor() + "\"", true);
 
@@ -162,6 +161,18 @@ public class GitRecreator {
                 next = commitsQueue.getFirst();
             }
         }
+    }
+
+    private static Pattern windowsPathPrefix = Pattern.compile("[A-Z]:");
+
+    public static String toLinuxPath(String path) {
+        path = path.replace("\\", "/");
+        Matcher matcher = windowsPathPrefix.matcher(path);
+        if (matcher.find()) {
+            String[] data = path.split(":", 2);
+            path = "/" + data[0].toLowerCase() + data[1];
+        }
+        return path;
     }
 
     private void loadCommits() {
