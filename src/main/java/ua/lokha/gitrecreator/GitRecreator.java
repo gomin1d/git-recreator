@@ -1,6 +1,7 @@
 package ua.lokha.gitrecreator;
 
 import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
 
@@ -14,6 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Getter
+@Setter
 public class GitRecreator {
 
     private LinkedList<Commit> commitsQueue = new LinkedList<>();
@@ -22,6 +24,13 @@ public class GitRecreator {
     private File from;
     private File to;
 
+    private  File gitMessage = new File("git-message.txt");
+    {
+        gitMessage.deleteOnExit();
+    }
+
+    private Set<String> deleteChild;
+
     private int branchId;
 
     public GitRecreator(File from, File to) {
@@ -29,11 +38,9 @@ public class GitRecreator {
         this.to = to;
     }
 
-    public GitRecreator(LinkedList<Commit> commitsQueue, Map<String, Commit> commits, File from, File to, int branchId) {
+    public GitRecreator(LinkedList<Commit> commitsQueue, Map<String, Commit> commits, int branchId) {
         this.commitsQueue = commitsQueue;
         this.commits = commits;
-        this.from = from;
-        this.to = to;
         this.branchId = branchId;
     }
 
@@ -65,9 +72,6 @@ public class GitRecreator {
             return;
         }
 
-        File gitMessage = new File("git-message.txt");
-        gitMessage.deleteOnExit();
-
         Commit next = commitsQueue.getFirst();
         System.out.println("начинаем с коммита " + next);
 
@@ -78,80 +82,24 @@ public class GitRecreator {
 
             System.out.println("iterate " + next);
 
-            for (Commit parent : next.getParents()) {
-                if (parent.getNewHash() == null) {
-                    System.out.println("need parent first " + parent);
-                    next = parent;
-                    continue main;
-                }
+            if (deleteChild.contains(next.getOldHash())) {
+                System.out.println("delele child start " + next.getOldHash());
+                next.setMarkDelete(true);
+            } else if (!next.getParents().isEmpty() && next.getParents().get(0).isMarkDelete()) {
+                System.out.println("delele by parent " + next.getOldHash());
+                next.setMarkDelete(true);
             }
 
-            Commit commit = next;
-
-            // некоторые коммиты надо пропускать, сюда сохраняется коммит
-            // который будет заменен, если текущий коммит надо пропустить
-            Commit replace = null;
-
-            if (commit.getParents().size() > 1) { // is merge
-                Commit mergeTo = commit.getParents().get(0);
-                Commit mergeFrom = replace = commit.getParents().get(1);
-                System.out.println("merge " + mergeFrom.getOldHash() + " to " + mergeTo.getOldHash());
-
-                executeTo("git checkout " + mergeTo.getNewHash());
-                execute(to, "git merge " + mergeFrom.getNewHash() + " --no-commit", true);
-
-            } else {
-                if (!commit.getParents().isEmpty()) {
-                    executeTo("git checkout " + commit.getParents().get(0).getNewHash());
-                    replace = commit.getParents().get(0);
-                }
-            }
-
-            System.out.println("rsync files");
-            executeFrom("git checkout " + commit.getOldHash() + " -f");
-            executeFrom("git clean -fdx"); // clear untracked files
-
-            executeFrom("rsync -a --delete --progress --exclude .git . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
-            executeTo("git add -A");
-
-            String message = commit.getMessage();
-            String messageArg;
-            if (message.contains("\"") || message.contains("\n")) {
-                FileUtils.writeStringToFile(gitMessage, message, StandardCharsets.UTF_8);
-                messageArg = "-F " + gitMessage.getAbsolutePath();
-            } else {
-                messageArg = "-m \"" + message + "\"";
-            }
-            List<String> commitResult = execute(to,"git commit " + messageArg + " " +
-                    "--date \"" + commit.getDate() + "\" " +
-                    "--author \"" + commit.getAuthor() + "\"", true);
-
-            if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit, working tree clean"))) {
-                // fast forward
-                System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
-                for (Commit child : commit.getChildren()) {
-                    ListIterator<Commit> iterator = child.getParents().listIterator();
-                    while (iterator.hasNext()) {
-                        if (iterator.next().equals(commit)) {
-                            if (replace == null) {
-                                iterator.remove();
-                            } else {
-                                iterator.set(replace);
-                            }
-                        }
+            if (!next.isMarkDelete()) {
+                for (Commit parent : next.getParents()) {
+                    if (parent.getNewHash() == null && !parent.isMarkDelete()) {
+                        System.out.println("need parent first " + parent);
+                        next = parent;
+                        continue main;
                     }
                 }
-                if (replace != null) {
-                    replace.setChildren(commit.getChildren());
-                }
-                commit = replace;
-            } else {
-                String newHash = executeTo("git rev-parse HEAD").get(0);
-                commit.setNewHash(newHash);
-            }
 
-            if (commit != null && commit.getChildren().isEmpty()) {
-                executeTo("git checkout -b branch-" + branchId++);
+                commit(next);
             }
 
             commitsQueue.remove(next);
@@ -160,6 +108,88 @@ public class GitRecreator {
             } else {
                 next = commitsQueue.getFirst();
             }
+        }
+    }
+
+    @SneakyThrows
+    public void commit(Commit commit) {
+        System.out.println("start commit " + commit);
+        // некоторые коммиты надо пропускать, сюда сохраняется коммит
+        // который будет заменен, если текущий коммит надо пропустить
+        Commit replace = null;
+
+        if (commit.getParents().size() > 1) { // is merge
+            Commit mergeTo = commit.getParents().get(0);
+            Commit mergeFrom = commit.getParents().get(1);
+            System.out.println("merge " + mergeFrom.getOldHash() + " to " + mergeTo.getOldHash());
+
+            if (mergeTo.isMarkDelete()) {
+                executeTo("git checkout " + mergeFrom.getNewHash());
+                replace = mergeFrom;
+                System.out.println("Merge commit after delete parent");
+                commit.setMessage("Merge commit after delete parent: " + commit.getMessage());
+            } else if (mergeFrom.isMarkDelete()) {
+                executeTo("git checkout " + mergeTo.getNewHash());
+                replace = mergeTo;
+                System.out.println("Merge commit after delete parent");
+                commit.setMessage("Merge commit after delete parent: " + commit.getMessage());
+            } else {
+                executeTo("git checkout " + mergeTo.getNewHash());
+                replace = mergeFrom;
+                execute(to, "git merge " + mergeFrom.getNewHash() + " --no-commit", true);
+            }
+        } else {
+            if (!commit.getParents().isEmpty()) {
+                executeTo("git checkout " + commit.getParents().get(0).getNewHash());
+                replace = commit.getParents().get(0);
+            }
+        }
+
+        System.out.println("rsync files");
+        executeFrom("git checkout " + commit.getOldHash() + " -f");
+        executeFrom("git clean -fdx"); // clear untracked files
+
+        executeFrom("rsync -a --delete --progress --exclude .git . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
+        executeTo("git add -A");
+
+        String message = commit.getMessage();
+        String messageArg;
+        if (message.contains("\"") || message.contains("\n")) {
+            FileUtils.writeStringToFile(gitMessage, message, StandardCharsets.UTF_8);
+            messageArg = "-F " + gitMessage.getAbsolutePath();
+        } else {
+            messageArg = "-m \"" + message + "\"";
+        }
+        List<String> commitResult = execute(to,"git commit " + messageArg + " " +
+                "--date \"" + commit.getDate() + "\" " +
+                "--author \"" + commit.getAuthor() + "\"", true);
+
+        if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit, working tree clean"))) {
+            // fast forward
+            System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
+            for (Commit child : commit.getChildren()) {
+                ListIterator<Commit> iterator = child.getParents().listIterator();
+                while (iterator.hasNext()) {
+                    if (iterator.next().equals(commit)) {
+                        if (replace == null) {
+                            iterator.remove();
+                        } else {
+                            iterator.set(replace);
+                        }
+                    }
+                }
+            }
+            if (replace != null) {
+                replace.setChildren(commit.getChildren());
+            }
+            commit = replace;
+        } else {
+            String newHash = executeTo("git rev-parse HEAD").get(0);
+            commit.setNewHash(newHash);
+        }
+
+        if (commit != null && commit.getChildren().isEmpty()) {
+            executeTo("git checkout -b branch-" + branchId++);
         }
     }
 

@@ -13,6 +13,7 @@ public class Commit {
     private String newHash;
     private String author;
     private String date;
+    private boolean markDelete;
     private List<Commit> parents = new ArrayList<>();
     private List<Commit> children = new ArrayList<>();
 
@@ -20,12 +21,13 @@ public class Commit {
         this.oldHash = oldHash;
     }
 
-    public Commit(String message, String oldHash, String newHash, String author, String date) {
+    public Commit(String message, String oldHash, String newHash, String author, String date, boolean markDelete) {
         this.message = message;
         this.oldHash = oldHash;
         this.newHash = newHash;
         this.author = author;
         this.date = date;
+        this.markDelete = markDelete;
     }
 
     @Override

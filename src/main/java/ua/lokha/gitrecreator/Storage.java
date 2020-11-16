@@ -3,7 +3,6 @@ package ua.lokha.gitrecreator;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
-import java.io.File;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -16,9 +15,6 @@ public class Storage {
     private List<StorageCommit> commits;
     private List<String> commitsQueue;
 
-    private File from;
-    private File to;
-
     private int branchId;
 
     public static GitRecreator from(Storage storage) {
@@ -29,7 +25,8 @@ public class Storage {
                         storageCommit.getOldHash(),
                         storageCommit.getNewHash(),
                         storageCommit.getAuthor(),
-                        storageCommit.getDate()
+                        storageCommit.getDate(),
+                        storageCommit.isMarkDelete()
                 ))
                 .forEach(commit -> commits.put(commit.getOldHash(), commit));
         for (StorageCommit storageCommit : storage.getCommits()) {
@@ -44,7 +41,7 @@ public class Storage {
         LinkedList<Commit> queue = storage.getCommitsQueue().stream()
                 .map(commits::get)
                 .collect(Collectors.toCollection(LinkedList::new));
-        return new GitRecreator(queue, commits, storage.getFrom(), storage.getTo(), storage.getBranchId());
+        return new GitRecreator(queue, commits, storage.getBranchId());
     }
 
     public static Storage to(GitRecreator recreator) {
@@ -58,10 +55,11 @@ public class Storage {
                         commit.getNewHash(),
                         commit.getAuthor(),
                         commit.getDate(),
+                        commit.isMarkDelete(),
                         commit.getParents().stream().map(Commit::getOldHash).collect(Collectors.toList()),
                         commit.getChildren().stream().map(Commit::getOldHash).collect(Collectors.toList())
                 ))
                 .collect(Collectors.toList());
-        return new Storage(commits, queue, recreator.getFrom(), recreator.getTo(), recreator.getBranchId());
+        return new Storage(commits, queue, recreator.getBranchId());
     }
 }

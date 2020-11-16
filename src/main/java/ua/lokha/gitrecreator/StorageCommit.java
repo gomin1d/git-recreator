@@ -14,6 +14,7 @@ public class StorageCommit {
     private String newHash;
     private String author;
     private String date;
+    private boolean markDelete;
     private List<String> parents = new ArrayList<>();
     private List<String> children = new ArrayList<>();
 }
