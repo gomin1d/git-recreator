@@ -30,6 +30,7 @@ public class GitRecreator {
     }
 
     private Set<String> deleteChild;
+    private String rsyncFlags = null;
 
     private int branchId;
 
@@ -149,14 +150,16 @@ public class GitRecreator {
         executeFrom("git checkout " + commit.getOldHash() + " -f");
         executeFrom("git clean -fdx"); // clear untracked files
 
-        executeFrom("rsync -a --delete --progress --exclude .git . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
+        executeFrom("rsync -a --delete --progress --exclude .git" +
+                (rsyncFlags == null ? "" : (" " + rsyncFlags)) +
+                " . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
         executeTo("git add -A");
 
         String message = commit.getMessage();
         String messageArg;
         if (message.contains("\"") || message.contains("\n")) {
             FileUtils.writeStringToFile(gitMessage, message, StandardCharsets.UTF_8);
-            messageArg = "-F " + gitMessage.getAbsolutePath();
+            messageArg = "-F \"" + gitMessage.getAbsolutePath() + "\"";
         } else {
             messageArg = "-m \"" + message + "\"";
         }
@@ -164,7 +167,7 @@ public class GitRecreator {
                 "--date \"" + commit.getDate() + "\" " +
                 "--author \"" + commit.getAuthor() + "\"", true);
 
-        if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit, working tree clean"))) {
+        if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit"))) {
             // fast forward
             System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
             for (Commit child : commit.getChildren()) {
