@@ -156,6 +156,17 @@ public class GitRecreator {
         executeFrom("rsync -a --delete --progress --exclude .git" +
                 (rsyncFlags == null ? "" : (" " + rsyncFlags)) +
                 " . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
+        replaceTabspaces(to);
+        File file = new File(to, ".gitattributes");
+        if (file.exists()) {
+            file.delete();
+        }
+        FileUtils.writeStringToFile(file, "#Полноценная документация доступна по ссылке https://git-scm.com/docs/gitattributes\n" +
+                "\n" +
+                "#Символ прерывания строки. LF (\\n) - line feed: перенос на новую строку.\n" +
+                "#CRLF (\\r\\n) carriage return; line feed - возврат каретки и перенос на новую строку\n" +
+                "*.java text eol=lf", StandardCharsets.UTF_8);
+
         executeTo("git add -A");
 
         String message = commit.getMessage();
@@ -426,6 +437,25 @@ public class GitRecreator {
             } else {
                 throw e;
             }
+        }
+    }
+
+    public void replaceTabspaces(File dir) {
+        for (File file : dir.listFiles()) {
+            if (file.isDirectory()) {
+                this.replaceTabspaces(file);
+            } else if (file.isFile() && file.getName().endsWith(".java")) {
+                this.replaceTabspace(file);
+            }
+        }
+    }
+
+    @SneakyThrows
+    public void replaceTabspace(File file) {
+        String content = FileUtils.readFileToString(file, StandardCharsets.UTF_8);
+        String replace = content.replace("\t", "    ");
+        if (content.length() != replace.length()) {
+            FileUtils.writeStringToFile(file, replace, StandardCharsets.UTF_8);
         }
     }
 }
