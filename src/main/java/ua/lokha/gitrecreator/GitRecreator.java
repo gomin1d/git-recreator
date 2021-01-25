@@ -5,6 +5,7 @@ import lombok.Setter;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.SystemUtils;
 import org.apache.commons.text.similarity.JaroWinklerDistance;
 
 import java.io.BufferedReader;
@@ -166,9 +167,21 @@ public class GitRecreator {
         } else {
             messageArg = "-m \"" + message + "\"";
         }
-        List<String> commitResult = execute(to,"git commit " + messageArg + " " +
-                "--date \"" + commit.getDate() + "\" " +
-                "--author \"" + commit.getAuthor() + "\"", true);
+
+        String[] authorData = commit.getAuthor().split(" <");
+        String[] committerData = commit.getCommitter().split(" <");
+
+        String cmdSetVariable = SystemUtils.IS_OS_WINDOWS ? "set" : "export";
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(cmdSetVariable + " GIT_AUTHOR_NAME=\"" + authorData[0] + "\"");
+        builder.append(" && " + cmdSetVariable + " GIT_AUTHOR_EMAIL=\"" + authorData[1] + "\"");
+        builder.append(" && " + cmdSetVariable + " GIT_AUTHOR_DATE=\"" + commit.getAuthorDate() + "\"");
+        builder.append(" && " + cmdSetVariable + " GIT_COMMITTER_NAME=\"" + committerData[0] + "\"");
+        builder.append(" && " + cmdSetVariable + " GIT_COMMITTER_EMAIL=\"" + committerData[1] + "\"");
+        builder.append(" && " + cmdSetVariable + " GIT_COMMITTER_DATE=\"" + commit.getCommitterDate() + "\"");
+        builder.append(" && git commit " + messageArg);
+        List<String> commitResult = execute(to, builder.toString(), true);
 
         if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit"))) {
             // fast forward
@@ -212,7 +225,7 @@ public class GitRecreator {
     }
 
     public void loadCommits() {
-        List<String> commitsRaw = executeFrom("git log --all --no-abbrev --no-decorate");
+        List<String> commitsRaw = executeFrom("git log --all --no-abbrev --no-decorate --format=fuller");
 
         Iterator<String> it = commitsRaw.iterator();
         String start = it.next();
@@ -226,14 +239,26 @@ public class GitRecreator {
             String author;
             do {
                 author = it.next();
-            }while (!author.startsWith("Author: "));
-            author = author.replace("Author: ", "");
+            }while (!author.startsWith("Author:     "));
+            author = author.replace("Author:     ", "");
 
-            String date;
+            String authorDate;
             do {
-                date = it.next();
-            }while (!date.startsWith("Date:   "));
-            date = date.replace("Date:   ", "");
+                authorDate = it.next();
+            }while (!authorDate.startsWith("AuthorDate: "));
+            authorDate = authorDate.replace("AuthorDate: ", "");
+
+            String committer;
+            do {
+                committer = it.next();
+            }while (!committer.startsWith("Commit:     "));
+            committer = committer.replace("Commit:     ", "");
+
+            String committerDate;
+            do {
+                committerDate = it.next();
+            }while (!committerDate.startsWith("CommitDate: "));
+            committerDate = committerDate.replace("CommitDate: ", "");
 
             while (!it.next().equals("")) {} // skip start message empty line
 
@@ -253,7 +278,9 @@ public class GitRecreator {
 
             Commit commit = new Commit(hash);
             commit.setAuthor(author);
-            commit.setDate(date);
+            commit.setAuthorDate(authorDate);
+            commit.setCommitter(committer);
+            commit.setCommitterDate(committerDate);
             String message = builder.toString();
             if (message.endsWith("\n")) {
                 message = message.substring(0, message.length() - 1);
@@ -356,7 +383,7 @@ public class GitRecreator {
                 } else {
                     message += "\n";
                 }
-                message += "Concat commit: " + commit.getMessage() + " " + commit.getDate() + " (old hash " + commit.getOldHash() + ")";
+                message += "Concat commit: " + commit.getMessage() + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
                 parent.setMessage(message);
                 parent.setOldHash(commit.getOldHash());
                 commits.put(commit.getOldHash(), parent);
