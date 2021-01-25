@@ -79,12 +79,13 @@ public class GitRecreator {
         Commit next = commitsQueue.getFirst();
         System.out.println("начинаем с коммита " + next);
 
+        int size = commitsQueue.size();
         main: while (next != null) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedException();
             }
 
-            System.out.println("iterate " + next);
+            System.out.println("iterate (" + (size-commitsQueue.size())  + "/" + size + ") " + next);
 
             if (deleteChild.contains(next.getOldHash())) {
                 System.out.println("delele child start " + next.getOldHash());
@@ -153,9 +154,14 @@ public class GitRecreator {
         executeFrom("git checkout " + commit.getOldHash() + " -f");
         executeFrom("git clean -fdx"); // clear untracked files
 
-        executeFrom("rsync -a --delete --progress --exclude .git" +
-                (rsyncFlags == null ? "" : (" " + rsyncFlags)) +
-                " . \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
+        try {
+            executeFrom("rsync -a --delete --progress --exclude .git" +
+                    (rsyncFlags == null ? "" : (" " + rsyncFlags)) +
+                    " ./*Wrapper*/ \"" + toLinuxPath(to.getAbsolutePath()) + "\"");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         replaceTabspaces(to);
         File file = new File(to, ".gitattributes");
         if (file.exists()) {
