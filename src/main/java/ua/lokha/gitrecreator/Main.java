@@ -18,6 +18,7 @@ public class Main {
         boolean continueRecreate = false;
         Set<String> deleteChild = new HashSet<>();
         String rsyncFlags = null;
+        double deleteDuplicatesThreshold = -1;
         for (int i = 0; i < args.length; i++) {
             if (args[i].startsWith("--")) {
                 if (args[i].equals("--continue")) {
@@ -33,6 +34,12 @@ public class Main {
                         throw new IllegalArgumentException("после rsync-flags должно быть указано значение");
                     }
                     rsyncFlags = args[i + 1];
+                    i++;
+                } else if (args[i].equals("--delete-duplicates-threshold")) {
+                    if (args.length - i <= 1) {
+                        throw new IllegalArgumentException("после rsync-flags должно быть указано значение");
+                    }
+                    deleteDuplicatesThreshold = Double.parseDouble(args[i + 1]);
                     i++;
                 }
             } else {
@@ -68,11 +75,13 @@ public class Main {
             System.out.println("to " + to);
             System.out.println("deleteChild " + deleteChild);
             System.out.println("rsyncFlags " + rsyncFlags);
+            System.out.println("deleteDuplicatesThreshold " + deleteDuplicatesThreshold);
 
             recreator.setFrom(from);
             recreator.setTo(to);
             recreator.setDeleteChild(deleteChild);
             recreator.setRsyncFlags(rsyncFlags);
+            recreator.setDeleteDuplicatesThreshold(deleteDuplicatesThreshold);
 
             if (file.exists()) {
                 recreator.continueRecreate();

@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.similarity.JaroWinklerDistance;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -31,6 +33,7 @@ public class GitRecreator {
 
     private Set<String> deleteChild;
     private String rsyncFlags = null;
+    private double deleteDuplicatesThreshold = -1;
 
     private int branchId;
 
@@ -208,7 +211,7 @@ public class GitRecreator {
         return path;
     }
 
-    private void loadCommits() {
+    public void loadCommits() {
         List<String> commitsRaw = executeFrom("git log --all --no-abbrev --no-decorate");
 
         Iterator<String> it = commitsRaw.iterator();
@@ -285,6 +288,83 @@ public class GitRecreator {
                 children.getParents().add(parent);
             }
         }
+
+        if (deleteDuplicatesThreshold != -1) {
+            while (this.removeDublicates() > 0) {
+            }
+        }
+    }
+
+    private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
+
+    private int removeDublicates() {
+        int concat = 0;
+        int size = commitsQueue.size();
+        for (ListIterator<Commit> iterator = commitsQueue.listIterator(); iterator.hasNext(); ) {
+            Commit commit = iterator.next();
+            if (deleteChild != null && deleteChild.contains(commit.getOldHash())) {
+                continue;
+            }
+            if (commit.getParents().size() != 1) {
+                continue;
+            }
+            Commit parent = commit.getParents().get(0);
+            if (!parent.getAuthor().equals(commit.getAuthor())) {
+                continue;
+            }
+            Double apply = jaroWinklerDistance.apply(
+                    StringUtils.remove(parent.getMessage().split("\n")[0], "(With concat)"),
+                    StringUtils.remove(commit.getMessage().split("\n")[0], "(With concat)")
+            );
+            if (apply > deleteDuplicatesThreshold) {
+                concat++;
+                iterator.remove();
+                boolean change = false;
+                for (Commit child : commit.getChildren()) {
+                    for (int i = 0; i < child.getParents().size(); i++) {
+                        if (child.getParents().get(i).equals(commit)) {
+                            child.getParents().set(i, parent);
+                            change = true;
+                        }
+                    }
+                }
+                if (!change && commit.getChildren().size() > 0) {
+                    throw new IllegalStateException();
+                }
+                change = false;
+                ListIterator<Commit> listIterator = parent.getChildren().listIterator();
+                while (listIterator.hasNext()) {
+                    Commit next = listIterator.next();
+                    if (next.equals(commit)) {
+                        for (int i = 0; i < commit.getChildren().size(); i++) {
+                            if (i == 0) {
+                                listIterator.set(commit.getChildren().get(i));
+                            } else {
+                                listIterator.add(commit.getChildren().get(i));
+                            }
+                        }
+                        change = true;
+                    }
+                }
+                if (!change) {
+                    throw new IllegalStateException();
+                }
+
+                String message = parent.getMessage();
+                if (!message.contains("\n")) {
+                    message += " (With concat)\n\n";
+                } else {
+                    message += "\n";
+                }
+                message += "Concat commit: " + commit.getMessage() + " " + commit.getDate() + " (old hash " + commit.getOldHash() + ")";
+                parent.setMessage(message);
+                parent.setOldHash(commit.getOldHash());
+                commits.put(commit.getOldHash(), parent);
+            }
+        }
+
+        System.out.println(concat + "/" + size + " (-> " + commits.size() + ")");
+        return concat;
     }
 
     public Commit getCommitByHash(String hash) {
