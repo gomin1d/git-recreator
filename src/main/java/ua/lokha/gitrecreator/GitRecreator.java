@@ -34,6 +34,7 @@ public class GitRecreator {
     }
 
     private Set<String> deleteChild;
+    private Set<String> deleteCommits;
     private String rsyncFlags = null;
     private double deleteDuplicatesThreshold = -1;
 
@@ -289,6 +290,14 @@ public class GitRecreator {
 
         if (deleteDuplicatesThreshold != -1) {
             while (this.removeDublicates() > 0) {
+            }
+        }
+        if (deleteCommits != null) {
+            for (String hash : deleteCommits) {
+                Commit commit = this.getCommitByHash(hash);
+                Commit parent = commit.getParents().isEmpty() ? null : commit.getParents().get(0);
+                this.replaceCommit(commit, parent);
+                commitsQueue.remove(commit);
             }
         }
     }
