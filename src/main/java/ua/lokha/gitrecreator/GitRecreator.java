@@ -295,6 +295,7 @@ public class GitRecreator {
 
     private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
     private static List<String> removeFromMessage = Arrays.asList("Revert \"", "(With concat)");
+    private static Pattern pattern = Pattern.compile("With concat ([0-9]+) commits");
 
     private int removeDublicates() {
         int concat = 0;
@@ -335,10 +336,12 @@ public class GitRecreator {
                 }
 
                 String message = parent.getMessage();
-                if (!message.contains("\n")) {
-                    message += " (With concat)\n\n";
+                Matcher matcher = pattern.matcher(message);
+                if (matcher.find()) {
+                    int count = Integer.parseInt(matcher.group(1));
+                    message = matcher.replaceFirst("With concat " + (count + 1) + " commits") + "\n";
                 } else {
-                    message += "\n";
+                    message += " (With concat 1 commits)\n\n";
                 }
                 message += "Concat commit: " + commit.getMessage() + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
                 parent.setMessage(message);
