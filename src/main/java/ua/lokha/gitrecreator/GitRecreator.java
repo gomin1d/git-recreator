@@ -23,6 +23,7 @@ public class GitRecreator {
 
     private LinkedList<Commit> commitsQueue = new LinkedList<>();
     private Map<String, Commit> commits = new HashMap<>();
+    private Map<String, Commit> newCommits = new HashMap<>();
 
     private File from;
     private File to;
@@ -80,12 +81,13 @@ public class GitRecreator {
         Commit next = commitsQueue.getFirst();
         System.out.println("начинаем с коммита " + next);
 
+        int size = commitsQueue.size();
         main: while (next != null) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedException();
             }
 
-            System.out.println("iterate " + next);
+            System.out.println("iterate (" + (size-commitsQueue.size())  + "/" + size + ") " + next);
 
             if (deleteChild.contains(next.getOldHash())) {
                 System.out.println("delele child start " + next.getOldHash());
@@ -119,34 +121,16 @@ public class GitRecreator {
     @SneakyThrows
     public void commit(Commit commit) {
         System.out.println("start commit " + commit);
-        // некоторые коммиты надо пропускать, сюда сохраняется коммит
-        // который будет заменен, если текущий коммит надо пропустить
-        Commit replace = null;
-
         if (commit.getParents().size() > 1) { // is merge
             Commit mergeTo = commit.getParents().get(0);
             Commit mergeFrom = commit.getParents().get(1);
             System.out.println("merge " + mergeFrom.getOldHash() + " to " + mergeTo.getOldHash());
 
-            if (mergeTo.isMarkDelete()) {
-                executeTo("git checkout " + mergeFrom.getNewHash());
-                replace = mergeFrom;
-                System.out.println("Merge commit after delete parent");
-                commit.setMessage("Merge commit after delete parent: " + commit.getMessage());
-            } else if (mergeFrom.isMarkDelete()) {
-                executeTo("git checkout " + mergeTo.getNewHash());
-                replace = mergeTo;
-                System.out.println("Merge commit after delete parent");
-                commit.setMessage("Merge commit after delete parent: " + commit.getMessage());
-            } else {
-                executeTo("git checkout " + mergeTo.getNewHash());
-                replace = mergeFrom;
-                execute(to, "git merge " + mergeFrom.getNewHash() + " --no-commit", true);
-            }
+            executeTo("git checkout " + mergeTo.getNewHash());
+            execute(to, "git merge " + mergeFrom.getNewHash() + " --no-commit", true);
         } else {
             if (!commit.getParents().isEmpty()) {
                 executeTo("git checkout " + commit.getParents().get(0).getNewHash());
-                replace = commit.getParents().get(0);
             }
         }
 
@@ -183,27 +167,14 @@ public class GitRecreator {
         builder.append(" && git commit " + messageArg);
         List<String> commitResult = execute(to, builder.toString(), true);
 
+        String newHash = executeTo("git rev-parse HEAD").get(0);
         if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit"))) {
-            // fast forward
+            // fast forward or remove
+            Commit replace = this.getCommitByNewHash(newHash);
             System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
-            for (Commit child : commit.getChildren()) {
-                ListIterator<Commit> iterator = child.getParents().listIterator();
-                while (iterator.hasNext()) {
-                    if (iterator.next().equals(commit)) {
-                        if (replace == null) {
-                            iterator.remove();
-                        } else {
-                            iterator.set(replace);
-                        }
-                    }
-                }
-            }
-            if (replace != null) {
-                replace.setChildren(commit.getChildren());
-            }
+            this.replaceCommit(commit, replace);
             commit = replace;
         } else {
-            String newHash = executeTo("git rev-parse HEAD").get(0);
             commit.setNewHash(newHash);
         }
 
@@ -323,6 +294,7 @@ public class GitRecreator {
     }
 
     private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
+    private static List<String> removeFromMessage = Arrays.asList("Revert \"", "(With concat)");
 
     private int removeDublicates() {
         int concat = 0;
@@ -339,40 +311,25 @@ public class GitRecreator {
             if (!parent.getAuthor().equals(commit.getAuthor())) {
                 continue;
             }
+            if (parent.getChildren().size() != 1) {
+                continue;
+            }
+            String parentMessage = parent.getMessage().split("\n")[0];
+            for (String remove : removeFromMessage) {
+                parentMessage = StringUtils.remove(parentMessage, remove);
+            }
+            String commitMessage = commit.getMessage().split("\n")[0];
+            for (String remove : removeFromMessage) {
+                commitMessage = StringUtils.remove(commitMessage, remove);
+            }
             Double apply = jaroWinklerDistance.apply(
-                    StringUtils.remove(parent.getMessage().split("\n")[0], "(With concat)"),
-                    StringUtils.remove(commit.getMessage().split("\n")[0], "(With concat)")
+                    parentMessage,
+                    commitMessage
             );
             if (apply > deleteDuplicatesThreshold) {
                 concat++;
                 iterator.remove();
-                boolean change = false;
-                for (Commit child : commit.getChildren()) {
-                    for (int i = 0; i < child.getParents().size(); i++) {
-                        if (child.getParents().get(i).equals(commit)) {
-                            child.getParents().set(i, parent);
-                            change = true;
-                        }
-                    }
-                }
-                if (!change && commit.getChildren().size() > 0) {
-                    throw new IllegalStateException();
-                }
-                change = false;
-                ListIterator<Commit> listIterator = parent.getChildren().listIterator();
-                while (listIterator.hasNext()) {
-                    Commit next = listIterator.next();
-                    if (next.equals(commit)) {
-                        for (int i = 0; i < commit.getChildren().size(); i++) {
-                            if (i == 0) {
-                                listIterator.set(commit.getChildren().get(i));
-                            } else {
-                                listIterator.add(commit.getChildren().get(i));
-                            }
-                        }
-                        change = true;
-                    }
-                }
+                boolean change = this.replaceCommit(commit, parent);
                 if (!change) {
                     throw new IllegalStateException();
                 }
@@ -394,12 +351,57 @@ public class GitRecreator {
         return concat;
     }
 
+    private boolean replaceCommit(Commit commit, Commit replace) {
+        boolean change = false;
+        for (Commit child : commit.getChildren()) {
+            for (int i = 0; i < child.getParents().size(); i++) {
+                if (child.getParents().get(i).equals(commit)) {
+                    child.getParents().set(i, replace);
+                    change = true;
+                }
+            }
+        }
+        commit.getChildren().removeIf(Objects::isNull);
+        if (!change && commit.getChildren().size() > 0) {
+            throw new IllegalStateException();
+        }
+        change = false;
+        if (replace != null) {
+            ListIterator<Commit> listIterator = replace.getChildren().listIterator();
+            while (listIterator.hasNext()) {
+                Commit next = listIterator.next();
+                if (next.equals(commit)) {
+                    for (int i = 0; i < commit.getChildren().size(); i++) {
+                        if (i == 0) {
+                            listIterator.set(commit.getChildren().get(i));
+                        } else {
+                            listIterator.add(commit.getChildren().get(i));
+                        }
+                    }
+                    change = true;
+                }
+            }
+        }
+        return change;
+    }
+
     public Commit getCommitByHash(String hash) {
         Commit commit = commits.get(hash);
         if (commit == null) {
             throw new NoSuchElementException(hash);
         }
         return commit;
+    }
+
+    public Commit getCommitByNewHash(String hash) {
+        return newCommits.computeIfAbsent(hash, key -> {
+            for (Commit commit : commits.values()) {
+                if (hash.equals(commit.getNewHash())) {
+                    return commit;
+                }
+            }
+            throw new NoSuchElementException(hash);
+        });
     }
 
     public List<String> executeTo(String command) {
@@ -412,7 +414,7 @@ public class GitRecreator {
 
     @SneakyThrows
     public List<String> execute(File base, String command, boolean ignoreError) {
-        System.out.println("execute: " + command);
+        System.out.println("execute " + base.getName() + ": " + command);
         ProcessBuilder builder;
         if (System.getProperty("os.name").toLowerCase().contains("win")) {
             builder = new ProcessBuilder(
