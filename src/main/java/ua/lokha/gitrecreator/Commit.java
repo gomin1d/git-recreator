@@ -12,7 +12,9 @@ public class Commit {
     private String oldHash;
     private String newHash;
     private String author;
-    private String date;
+    private String authorDate;
+    private String committer;
+    private String committerDate;
     private boolean markDelete;
     private List<Commit> parents = new ArrayList<>();
     private List<Commit> children = new ArrayList<>();
@@ -21,12 +23,14 @@ public class Commit {
         this.oldHash = oldHash;
     }
 
-    public Commit(String message, String oldHash, String newHash, String author, String date, boolean markDelete) {
+    public Commit(String message, String oldHash, String newHash, String author, String authorDate, String committer, String committerDate, boolean markDelete) {
         this.message = message;
         this.oldHash = oldHash;
         this.newHash = newHash;
         this.author = author;
-        this.date = date;
+        this.authorDate = authorDate;
+        this.committer = committer;
+        this.committerDate = committerDate;
         this.markDelete = markDelete;
     }
 
@@ -50,7 +54,9 @@ public class Commit {
                 ", oldHash='" + oldHash + '\'' +
                 ", newHash='" + newHash + '\'' +
                 ", author='" + author + '\'' +
-                ", date='" + date + '\'' +
+                ", authorDate='" + authorDate + '\'' +
+                ", committer='" + committer + '\'' +
+                ", committerDate='" + committerDate + '\'' +
                 '}';
     }
 }
