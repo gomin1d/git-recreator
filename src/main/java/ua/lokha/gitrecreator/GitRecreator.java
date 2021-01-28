@@ -4,7 +4,6 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.SystemUtils;
 import org.apache.commons.text.similarity.JaroWinklerDistance;
 
@@ -303,7 +302,9 @@ public class GitRecreator {
     }
 
     private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
-    private static List<String> removeFromMessage = Arrays.asList("Revert \"", "(With concat)");
+    private static List<Pattern> removeFromMessage = Arrays.asList(
+            Pattern.compile("Revert \"", Pattern.LITERAL),
+            Pattern.compile("\\(With concat ([0-9]+) commits\\)"));
     private static Pattern pattern = Pattern.compile("With concat ([0-9]+) commits");
 
     private int removeDublicates() {
@@ -325,12 +326,12 @@ public class GitRecreator {
                 continue;
             }
             String parentMessage = parent.getMessage().split("\n")[0];
-            for (String remove : removeFromMessage) {
-                parentMessage = StringUtils.remove(parentMessage, remove);
+            for (Pattern remove : removeFromMessage) {
+                parentMessage = remove.matcher(parentMessage).replaceAll("");
             }
             String commitMessage = commit.getMessage().split("\n")[0];
-            for (String remove : removeFromMessage) {
-                commitMessage = StringUtils.remove(commitMessage, remove);
+            for (Pattern remove : removeFromMessage) {
+                commitMessage = remove.matcher(commitMessage).replaceAll("");
             }
             Double apply = jaroWinklerDistance.apply(
                     parentMessage,
