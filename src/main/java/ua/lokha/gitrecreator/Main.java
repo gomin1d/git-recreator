@@ -17,6 +17,7 @@ public class Main {
         int index = 0;
         boolean continueRecreate = false;
         Set<String> deleteChild = new HashSet<>();
+        Set<String> deleteCommits = new HashSet<>();
         String rsyncFlags = null;
         double deleteDuplicatesThreshold = -1;
         for (int i = 0; i < args.length; i++) {
@@ -28,6 +29,12 @@ public class Main {
                         throw new IllegalArgumentException("после delete-children должен быть указан хеш или хеши через запятую");
                     }
                     deleteChild.addAll(Arrays.asList(args[i + 1].split(",")));
+                    i++;
+                } else if (args[i].equals("--delete-commits")) {
+                    if (args.length - i <= 1) {
+                        throw new IllegalArgumentException("после delete-commits должен быть указан хеш или хеши через запятую");
+                    }
+                    deleteCommits.addAll(Arrays.asList(args[i + 1].split(",")));
                     i++;
                 } else if (args[i].equals("--rsync-flags")) {
                     if (args.length - i <= 1) {
@@ -74,12 +81,14 @@ public class Main {
             System.out.println("from " + from);
             System.out.println("to " + to);
             System.out.println("deleteChild " + deleteChild);
+            System.out.println("deleteCommits " + deleteCommits);
             System.out.println("rsyncFlags " + rsyncFlags);
             System.out.println("deleteDuplicatesThreshold " + deleteDuplicatesThreshold);
 
             recreator.setFrom(from);
             recreator.setTo(to);
             recreator.setDeleteChild(deleteChild);
+            recreator.setDeleteCommits(deleteCommits);
             recreator.setRsyncFlags(rsyncFlags);
             recreator.setDeleteDuplicatesThreshold(deleteDuplicatesThreshold);
 

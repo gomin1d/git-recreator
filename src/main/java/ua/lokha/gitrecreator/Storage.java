@@ -25,7 +25,9 @@ public class Storage {
                         storageCommit.getOldHash(),
                         storageCommit.getNewHash(),
                         storageCommit.getAuthor(),
-                        storageCommit.getDate(),
+                        storageCommit.getAuthorDate(),
+                        storageCommit.getCommitter(),
+                        storageCommit.getCommitterDate(),
                         storageCommit.isMarkDelete()
                 ))
                 .forEach(commit -> commits.put(commit.getOldHash(), commit));
@@ -54,7 +56,9 @@ public class Storage {
                         commit.getOldHash(),
                         commit.getNewHash(),
                         commit.getAuthor(),
-                        commit.getDate(),
+                        commit.getAuthorDate(),
+                        commit.getCommitter(),
+                        commit.getCommitterDate(),
                         commit.isMarkDelete(),
                         commit.getParents().stream().map(Commit::getOldHash).collect(Collectors.toList()),
                         commit.getChildren().stream().map(Commit::getOldHash).collect(Collectors.toList())
