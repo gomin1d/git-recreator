@@ -315,8 +315,9 @@ public class GitRecreator {
     private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
     private static List<Pattern> removeFromMessage = Arrays.asList(
             Pattern.compile("Revert \"", Pattern.LITERAL),
-            Pattern.compile("\\(With concat ([0-9]+) commits\\)"));
+            Pattern.compile(" \\(With concat ([0-9]+) commits\\)"));
     private static Pattern pattern = Pattern.compile("With concat ([0-9]+) commits");
+    private static Pattern pattern2 = Pattern.compile("Concat commit.+");
 
     private int removeDublicates() {
         int concat = 0;
@@ -356,50 +357,70 @@ public class GitRecreator {
                     throw new IllegalStateException();
                 }
 
+                Matcher messageOther = pattern.matcher(commit.getMessage());
+                int countOther = 0;
+                if (messageOther.find()) {
+                    countOther = Integer.parseInt(messageOther.group(1));
+                }
+                Matcher otherList = pattern2.matcher(commit.getMessage());
+                List<String> list = new ArrayList<>();
+                while (otherList.find()) {
+                    list.add(otherList.group());
+                }
+
                 String message = parent.getMessage();
                 Matcher matcher = pattern.matcher(message);
                 if (matcher.find()) {
                     int count = Integer.parseInt(matcher.group(1));
-                    message = matcher.replaceFirst("With concat " + (count + 1) + " commits") + "\n";
+                    message = matcher.replaceFirst("With concat " + (count + countOther + 1) + " commits") + "\n";
                 } else {
-                    message += " (With concat 1 commits)\n\n";
+                    message += " (With concat " + (countOther + 1) + " commits)\n\n";
                 }
-                message += "Concat commit: " + commit.getMessage() + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
+                for (String line : list) {
+                    message += line + "\n";
+                }
+                message += "Concat commit: " + commitMessage + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
                 parent.setMessage(message);
                 parent.setOldHash(commit.getOldHash());
                 commits.put(commit.getOldHash(), parent);
             }
         }
 
-        System.out.println(concat + "/" + size + " (-> " + commits.size() + ")");
+        System.out.println(concat + "/" + size + " (-> " + commitsQueue.size() + ")");
         return concat;
     }
 
     private boolean replaceCommit(Commit commit, Commit replace) {
         boolean change = false;
         for (Commit child : commit.getChildren()) {
-            for (int i = 0; i < child.getParents().size(); i++) {
-                if (child.getParents().get(i).equals(commit)) {
-                    child.getParents().set(i, replace);
+            ListIterator<Commit> iterator = child.getParents().listIterator();
+            while (iterator.hasNext()) {
+                if (iterator.next().equals(commit)) {
+                    if (replace == null) {
+                        iterator.remove();
+                    } else {
+                        iterator.set(replace);
+                    }
                     change = true;
                 }
             }
         }
-        commit.getChildren().removeIf(Objects::isNull);
         if (!change && commit.getChildren().size() > 0) {
             throw new IllegalStateException();
         }
         change = false;
         if (replace != null) {
+            List<Commit> toAdd = new LinkedList<>(commit.getChildren());
+            toAdd.removeAll(replace.getChildren());
             ListIterator<Commit> listIterator = replace.getChildren().listIterator();
             while (listIterator.hasNext()) {
                 Commit next = listIterator.next();
                 if (next.equals(commit)) {
-                    for (int i = 0; i < commit.getChildren().size(); i++) {
+                    for (int i = 0; i < toAdd.size(); i++) {
                         if (i == 0) {
-                            listIterator.set(commit.getChildren().get(i));
+                            listIterator.set(toAdd.get(i));
                         } else {
-                            listIterator.add(commit.getChildren().get(i));
+                            listIterator.add(toAdd.get(i));
                         }
                     }
                     change = true;
