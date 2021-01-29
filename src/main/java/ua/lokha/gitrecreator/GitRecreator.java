@@ -367,28 +367,34 @@ public class GitRecreator {
     private boolean replaceCommit(Commit commit, Commit replace) {
         boolean change = false;
         for (Commit child : commit.getChildren()) {
-            for (int i = 0; i < child.getParents().size(); i++) {
-                if (child.getParents().get(i).equals(commit)) {
-                    child.getParents().set(i, replace);
+            ListIterator<Commit> iterator = child.getParents().listIterator();
+            while (iterator.hasNext()) {
+                if (iterator.next().equals(commit)) {
+                    if (replace == null) {
+                        iterator.remove();
+                    } else {
+                        iterator.set(replace);
+                    }
                     change = true;
                 }
             }
         }
-        commit.getChildren().removeIf(Objects::isNull);
         if (!change && commit.getChildren().size() > 0) {
             throw new IllegalStateException();
         }
         change = false;
         if (replace != null) {
+            List<Commit> toAdd = new LinkedList<>(commit.getChildren());
+            toAdd.removeAll(replace.getChildren());
             ListIterator<Commit> listIterator = replace.getChildren().listIterator();
             while (listIterator.hasNext()) {
                 Commit next = listIterator.next();
                 if (next.equals(commit)) {
-                    for (int i = 0; i < commit.getChildren().size(); i++) {
+                    for (int i = 0; i < toAdd.size(); i++) {
                         if (i == 0) {
-                            listIterator.set(commit.getChildren().get(i));
+                            listIterator.set(toAdd.get(i));
                         } else {
-                            listIterator.add(commit.getChildren().get(i));
+                            listIterator.add(toAdd.get(i));
                         }
                     }
                     change = true;
