@@ -304,8 +304,9 @@ public class GitRecreator {
     private static JaroWinklerDistance jaroWinklerDistance = new JaroWinklerDistance();
     private static List<Pattern> removeFromMessage = Arrays.asList(
             Pattern.compile("Revert \"", Pattern.LITERAL),
-            Pattern.compile("\\(With concat ([0-9]+) commits\\)"));
+            Pattern.compile(" \\(With concat ([0-9]+) commits\\)"));
     private static Pattern pattern = Pattern.compile("With concat ([0-9]+) commits");
+    private static Pattern pattern2 = Pattern.compile("Concat commit.+");
 
     private int removeDublicates() {
         int concat = 0;
@@ -345,22 +346,36 @@ public class GitRecreator {
                     throw new IllegalStateException();
                 }
 
+                Matcher messageOther = pattern.matcher(commit.getMessage());
+                int countOther = 0;
+                if (messageOther.find()) {
+                    countOther = Integer.parseInt(messageOther.group(1));
+                }
+                Matcher otherList = pattern2.matcher(commit.getMessage());
+                List<String> list = new ArrayList<>();
+                while (otherList.find()) {
+                    list.add(otherList.group());
+                }
+
                 String message = parent.getMessage();
                 Matcher matcher = pattern.matcher(message);
                 if (matcher.find()) {
                     int count = Integer.parseInt(matcher.group(1));
-                    message = matcher.replaceFirst("With concat " + (count + 1) + " commits") + "\n";
+                    message = matcher.replaceFirst("With concat " + (count + countOther + 1) + " commits") + "\n";
                 } else {
-                    message += " (With concat 1 commits)\n\n";
+                    message += " (With concat " + (countOther + 1) + " commits)\n\n";
                 }
-                message += "Concat commit: " + commit.getMessage() + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
+                for (String line : list) {
+                    message += line + "\n";
+                }
+                message += "Concat commit: " + commitMessage + " " + commit.getAuthorDate() + " (old hash " + commit.getOldHash() + ")";
                 parent.setMessage(message);
                 parent.setOldHash(commit.getOldHash());
                 commits.put(commit.getOldHash(), parent);
             }
         }
 
-        System.out.println(concat + "/" + size + " (-> " + commits.size() + ")");
+        System.out.println(concat + "/" + size + " (-> " + commitsQueue.size() + ")");
         return concat;
     }
 
