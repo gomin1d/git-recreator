@@ -167,10 +167,13 @@ public class GitRecreator {
         builder.append(" && git commit " + messageArg);
         List<String> commitResult = execute(to, builder.toString(), true);
 
-        String newHash = executeTo("git rev-parse HEAD").get(0);
+        String newHash = null;
+        try {
+            newHash = executeTo("git rev-parse HEAD").get(0);
+        } catch (Exception e) {}
         if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit"))) {
             // fast forward or remove
-            Commit replace = this.getCommitByNewHash(newHash);
+            Commit replace = newHash == null ? null : this.getCommitByNewHash(newHash);
             System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
             this.replaceCommit(commit, replace);
             commit = replace;
