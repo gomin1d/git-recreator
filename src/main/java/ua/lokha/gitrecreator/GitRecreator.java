@@ -56,19 +56,39 @@ public class GitRecreator {
             throw new FileNotFoundException(from.getAbsolutePath());
         }
 
-        execute(to, "rm -rf *", true);
-        execute(to, "rm -rf .*", true);
-        FileUtils.forceMkdir(to);
-        for (File file : from.listFiles((dir, name) -> name.endsWith(".patch"))) {
-            file.delete();
-        }
+//        execute(to, "rm -rf *", true);
+//        execute(to, "rm -rf .*", true);
+//        FileUtils.forceMkdir(to);
+//        for (File file : from.listFiles((dir, name) -> name.endsWith(".patch"))) {
+//            file.delete();
+//        }
         executeFrom("git clean -fdx"); // clear untracked files
 
         this.loadCommits();
 
-        executeTo("git init");
+//        executeTo("git init");
 
         continueRecreate();
+    }
+
+    public LinkedList<Commit> sub(Commit commit) {
+        LinkedList<Commit> commits = new LinkedList<>();
+        sub0(commits, commit);
+        for (Commit it : commits) {
+            it.getParents().removeIf(it2-> !commits.contains(it2));
+        }
+        return commits;
+    }
+
+    public static void sub0(LinkedList<Commit> commits, Commit commit) {
+        if (commits.contains(commit)) {
+            return;
+        }
+        commits.add(commit);
+        System.out.println(commits.size());
+        for (Commit child : commit.getChildren()) {
+            sub0(commits, child);
+        }
     }
 
     @SneakyThrows
@@ -77,6 +97,14 @@ public class GitRecreator {
             System.out.println("commits count is 0");
             return;
         }
+
+        System.out.println("before " + commitsQueue.size());
+        Commit commitByHash = this.getCommitByHash("c11733dfa9665ff5a6335912c8616f4611c7fe8e");
+        if (commitByHash == null) {
+            throw new IllegalStateException("c11733dfa9665ff5a6335912c8616f4611c7fe8e is null");
+        }
+        commitsQueue = this.sub(commitByHash);
+        System.out.println("after " + commitsQueue.size());
 
         Commit next = commitsQueue.getFirst();
         System.out.println("начинаем с коммита " + next);
@@ -173,7 +201,12 @@ public class GitRecreator {
         } catch (Exception e) {}
         if (commitResult.stream().anyMatch(s -> s.contains("nothing to commit"))) {
             // fast forward or remove
-            Commit replace = newHash == null ? null : this.getCommitByNewHash(newHash);
+            Commit replace = null;
+            try {
+                replace = newHash == null ? null : this.getCommitByNewHash(newHash);
+            } catch (Exception e) {
+                System.out.println("не найден текущий коммит но новому хешу");
+            }
             System.out.println("nothing to commit, replace " + commit.getOldHash() + " " + (replace == null ? null : replace.getOldHash()));
             this.replaceCommit(commit, replace);
             commit = replace;
